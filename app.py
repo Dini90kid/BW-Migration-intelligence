@@ -182,16 +182,26 @@ auto_script = """
     var gear = document.getElementById('admin-settings-btn');
     if (gear && auth.access==='admin') gear.style.display='inline-block';
 
-    // Wire ⏻ logout button → Streamlit session kill via query param
+    // Wire ⏻ logout button → goes through doLogout() so save-prompt shows first
     var lo = document.getElementById('header-logout-btn');
     if (lo) {
       lo.onclick = function(){
-        window.parent.location.href = window.parent.location.pathname + '?action=logout';
+        // Override confirmLogout to handle Streamlit redirect after optional save
+        window._streamlitLogout = function() {
+          window.parent.location.href = window.parent.location.pathname + '?action=logout';
+        };
+        if (typeof doLogout === 'function') doLogout();
+        else window._streamlitLogout();
       };
     }
-    // Also hide old floating logout if it exists
-    var oldLo = document.querySelector('.logout-btn');
-    if (oldLo) oldLo.style.display='none';
+    // Patch _performLogout to also kill Streamlit session when on server
+    var _origPerformLogout = typeof _performLogout === 'function' ? _performLogout : null;
+    if (_origPerformLogout) {
+      window._performLogout = function() {
+        _origPerformLogout();
+        setTimeout(function(){ window.parent.location.href = window.parent.location.pathname + '?action=logout'; }, 200);
+      };
+    }
 
     // ── STEP 1: Load server preloaded data FIRST (before applyAccessLevel) ──
     if (window.__BW_PRELOAD__ && typeof STATE!=='undefined' && typeof renderAll==='function'){
