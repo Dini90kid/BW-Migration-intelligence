@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -713,6 +714,84 @@ body {
 }
 
 /* ── CREDENTIALS MANAGER MODAL ── */
+/* ── LOGOUT CONFIRM MODAL ── */
+#logout-modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  background: rgba(0,0,0,.75);
+  backdrop-filter: blur(4px);
+  align-items: center;
+  justify-content: center;
+}
+#logout-modal-overlay.open { display: flex; }
+#logout-modal {
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  width: 380px;
+  max-width: 95vw;
+  box-shadow: 0 16px 60px rgba(0,0,0,.7);
+  animation: modalIn .2s ease;
+  overflow: hidden;
+}
+#logout-modal .lm-header {
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+#logout-modal .lm-icon { font-size: 20px; }
+#logout-modal .lm-title {
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: .03em;
+}
+#logout-modal .lm-body {
+  padding: 18px 20px;
+  font-size: 12px;
+  color: var(--text2);
+  line-height: 1.7;
+}
+#logout-modal .lm-meta {
+  font-size: 11px;
+  color: var(--text3);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin-top: 10px;
+  font-family: var(--mono);
+}
+#logout-modal .lm-footer {
+  padding: 12px 20px 16px;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.lm-btn {
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  border: 1px solid;
+  transition: all .18s;
+}
+.lm-btn.save    { background:rgba(0,255,136,.12); border-color:var(--green); color:var(--green); }
+.lm-btn.save:hover    { background:var(--green); color:var(--bg); }
+.lm-btn.skip    { background:none; border-color:var(--border2); color:var(--text3); }
+.lm-btn.skip:hover    { border-color:var(--text2); color:var(--text2); }
+.lm-btn.danger  { background:rgba(255,68,102,.1); border-color:var(--red); color:var(--red); }
+.lm-btn.danger:hover  { background:var(--red); color:var(--white); }
+
 #creds-modal-overlay {
   display: none;
   position: fixed;
@@ -1395,6 +1474,24 @@ body {
   <span id="badge-label">—</span>
   <button id="admin-settings-btn" onclick="openCredsModal()" title="Manage credentials">⚙</button>
   <span class="logout-btn" onclick="doLogout()" title="Sign out">⏻ logout</span>
+</div>
+
+<!-- Logout Confirmation Modal -->
+<div id="logout-modal-overlay">
+  <div id="logout-modal">
+    <div class="lm-header">
+      <span class="lm-icon">⏻</span>
+      <span class="lm-title">Sign Out</span>
+    </div>
+    <div class="lm-body">
+      <span id="lm-message">You have unsaved data. Save to server before signing out so it loads automatically next time?</span>
+      <div class="lm-meta" id="lm-meta"></div>
+    </div>
+    <div class="lm-footer">
+      <button class="lm-btn skip"   onclick="confirmLogout(false)">Logout Without Saving</button>
+      <button class="lm-btn save"   id="lm-save-btn" onclick="confirmLogout(true)">💾 Save &amp; Logout</button>
+    </div>
+  </div>
 </div>
 
 <!-- Credentials Manager Modal (Admin only) -->
@@ -7717,8 +7814,43 @@ function closeCredsModal() {
 }
 
 function doLogout() {
+  // If user has data loaded and can save — prompt first
+  const canSave = SESSION_USER && ['admin','analyst'].includes(SESSION_USER.access);
+  const hasData = STATE.useCases && STATE.useCases.length > 0;
+
+  if (canSave && hasData) {
+    // Show save-before-logout modal
+    const provCount = STATE.useCases.reduce((s,uc) => s+(uc.providers||[]).length, 0);
+    const meta = `${STATE.useCases.length} Use Cases · ${provCount} Providers`;
+    const metaEl = document.getElementById('lm-meta');
+    if (metaEl) metaEl.textContent = `Current data: ${meta}`;
+    const msgEl = document.getElementById('lm-message');
+    if (msgEl) msgEl.textContent = 'Save data to server before signing out so it loads automatically on next login?';
+    document.getElementById('logout-modal-overlay').classList.add('open');
+  } else {
+    // No data or guest — logout directly
+    _performLogout();
+  }
+}
+
+function confirmLogout(save) {
+  document.getElementById('logout-modal-overlay').classList.remove('open');
+  if (save) {
+    saveDataToStorage(); // saves to localStorage
+    // On Streamlit: also trigger server save via save button click
+    const sb = document.getElementById('save-data-btn');
+    if (sb) sb.click();
+    // Small delay to let save complete before logout
+    setTimeout(_performLogout, 600);
+  } else {
+    _performLogout();
+  }
+}
+
+function _performLogout() {
   SESSION_USER = null;
   closeCredsModal();
+  document.getElementById('logout-modal-overlay').classList.remove('open');
   const uploadBtn = document.getElementById('upload-trigger');
   if (uploadBtn) { uploadBtn.style.opacity=''; uploadBtn.style.pointerEvents=''; uploadBtn.title=''; }
   const saveBtn = document.getElementById('save-data-btn');
@@ -7729,14 +7861,11 @@ function doLogout() {
   if (aiSend) { aiSend.style.opacity=''; aiSend.style.pointerEvents=''; aiSend.title=''; }
   const gearBtn = document.getElementById('admin-settings-btn');
   if (gearBtn) gearBtn.style.display='none';
-  // Hide inline header controls
   const controls = document.getElementById('session-controls');
   if (controls) controls.style.display='none';
-  // Hide old floating badge if visible
   const oldBadge = document.getElementById('session-badge');
   if (oldBadge) oldBadge.style.display='none';
   STATE.useCases=[]; STATE.fmLibrary={};
-  // Reset login form — pre-fill admin username from current credentials
   const adminEntry = Object.entries(LOGIN_USERS).find(([,u])=>u.access==='admin');
   document.getElementById('login-user').value = adminEntry ? adminEntry[0] : 'admin';
   document.getElementById('login-pass').value='';
@@ -7769,17 +7898,16 @@ function showToast(msg, type) {
 }
 
 // ── SHOW SAVE BUTTON after data loaded for admin/analyst ─────
-function hookSaveBtn() {
+// Patch renderAll using a variable (not function declaration) to avoid hoisting/recursion
+const _origRenderAll = renderAll;
+renderAll = function() {
+  _origRenderAll();
+  // Show save button after any render if user is admin/analyst and data is loaded
   if (SESSION_USER && ['admin','analyst'].includes(SESSION_USER.access) && STATE.useCases && STATE.useCases.length) {
     const sb = document.getElementById('save-data-btn');
     if (sb) sb.style.display = 'inline-block';
   }
-}
-const _origRenderAll = renderAll;
-function renderAll() {
-  _origRenderAll();
-  hookSaveBtn();
-}
+};
 
 // ── INIT ─────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
